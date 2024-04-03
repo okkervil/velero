@@ -41,13 +41,14 @@ var BackupFunc = kopia.Backup
 var RestoreFunc = kopia.Restore
 var BackupRepoServiceCreateFunc = service.Create
 
-// kopiaProvider recorded info related with kopiaProvider
-type kopiaProvider struct {
+// KopiaProvider recorded info related with kopiaProvider
+type KopiaProvider struct {
 	requestorType string
 	bkRepo        udmrepo.BackupRepo
 	credGetter    *credentials.CredentialGetter
 	log           logrus.FieldLogger
 	canceling     int32
+	configFile    string
 }
 
 // NewKopiaUploaderProvider initialized with open or create a repository
@@ -58,18 +59,20 @@ func NewKopiaUploaderProvider(
 	backupRepo *velerov1api.BackupRepository,
 	log logrus.FieldLogger,
 ) (Provider, error) {
-	kp := &kopiaProvider{
+	//repoUID which is used to generate kopia repository config with unique directory path
+	repoUID := string(backupRepo.GetUID())
+	kp := &KopiaProvider{
 		requestorType: requestorType,
 		log:           log,
 		credGetter:    credGetter,
 	}
-	//repoUID which is used to generate kopia repository config with unique directory path
-	repoUID := string(backupRepo.GetUID())
+
 	repoOpt, err := udmrepo.NewRepoOptions(
 		udmrepo.WithPassword(kp, ""),
 		udmrepo.WithConfigFile("", repoUID),
 		udmrepo.WithDescription("Initial kopia uploader provider"),
 	)
+	kp.configFile = repoOpt.ConfigFilePath
 	if err != nil {
 		return nil, errors.Wrapf(err, "error to get repo options")
 	}
@@ -85,7 +88,7 @@ func NewKopiaUploaderProvider(
 }
 
 // CheckContext check context status check if context is timeout or cancel and backup restore once finished it will quit and return
-func (kp *kopiaProvider) CheckContext(ctx context.Context, finishChan chan struct{}, restoreChan chan struct{}, uploader *snapshotfs.Uploader) {
+func (kp *KopiaProvider) CheckContext(ctx context.Context, finishChan chan struct{}, restoreChan chan struct{}, uploader *snapshotfs.Uploader) {
 	select {
 	case <-finishChan:
 		kp.log.Infof("Action finished")
@@ -105,13 +108,13 @@ func (kp *kopiaProvider) CheckContext(ctx context.Context, finishChan chan struc
 	}
 }
 
-func (kp *kopiaProvider) Close(ctx context.Context) error {
+func (kp *KopiaProvider) Close(ctx context.Context) error {
 	return kp.bkRepo.Close(ctx)
 }
 
 // RunBackup which will backup specific path and update backup progress
 // return snapshotID, isEmptySnapshot, error
-func (kp *kopiaProvider) RunBackup(
+func (kp *KopiaProvider) RunBackup(
 	ctx context.Context,
 	path string,
 	realSource string,
@@ -158,7 +161,7 @@ func (kp *kopiaProvider) RunBackup(
 		realSource = fmt.Sprintf("%s/%s/%s", kp.requestorType, uploader.KopiaType, realSource)
 	}
 
-	snapshotInfo, isSnapshotEmpty, err := BackupFunc(ctx, kpUploader, repoWriter, path, realSource, forceFull, parentSnapshot, volMode, tags, log)
+	snapshotInfo, isSnapshotEmpty, err := BackupFunc(ctx, kpUploader, repoWriter, path, realSource, forceFull, parentSnapshot, volMode, tags, log, kp.configFile)
 	if err != nil {
 		if kpUploader.IsCanceled() {
 			log.Error("Kopia backup is canceled")
@@ -185,7 +188,7 @@ func (kp *kopiaProvider) RunBackup(
 	return snapshotInfo.ID, false, nil
 }
 
-func (kp *kopiaProvider) GetPassword(param interface{}) (string, error) {
+func (kp *KopiaProvider) GetPassword(param interface{}) (string, error) {
 	if kp.credGetter.FromSecret == nil {
 		return "", errors.New("invalid credentials interface")
 	}
@@ -198,7 +201,7 @@ func (kp *kopiaProvider) GetPassword(param interface{}) (string, error) {
 }
 
 // RunRestore which will restore specific path and update restore progress
-func (kp *kopiaProvider) RunRestore(
+func (kp *KopiaProvider) RunRestore(
 	ctx context.Context,
 	snapshotID string,
 	volumePath string,

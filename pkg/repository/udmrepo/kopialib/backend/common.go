@@ -18,6 +18,7 @@ package backend
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/kopia/kopia/repo"
@@ -26,25 +27,29 @@ import (
 	"github.com/kopia/kopia/repo/content"
 	"github.com/kopia/kopia/repo/encryption"
 	"github.com/kopia/kopia/repo/format"
-	"github.com/kopia/kopia/repo/hashing"
-	"github.com/kopia/kopia/repo/splitter"
-
 	"github.com/vmware-tanzu/velero/pkg/repository/udmrepo"
 )
 
 const (
-	maxDataCacheMB         = 2000
-	maxMetadataCacheMB     = 2000
+	maxDataCacheMB         = 20000
+	maxMetadataCacheMB     = 20000
 	maxCacheDurationSecond = 30
 )
 
 func setupLimits(ctx context.Context, flags map[string]string) throttling.Limits {
 	return throttling.Limits{
-		DownloadBytesPerSecond: optionalHaveFloat64(ctx, udmrepo.ThrottleOptionDownloadBytes, flags),
-		ListsPerSecond:         optionalHaveFloat64(ctx, udmrepo.ThrottleOptionListOps, flags),
-		ReadsPerSecond:         optionalHaveFloat64(ctx, udmrepo.ThrottleOptionReadOps, flags),
-		UploadBytesPerSecond:   optionalHaveFloat64(ctx, udmrepo.ThrottleOptionUploadBytes, flags),
-		WritesPerSecond:        optionalHaveFloat64(ctx, udmrepo.ThrottleOptionWriteOps, flags),
+		ReadsPerSecond:         math.MaxInt64,
+		WritesPerSecond:        math.MaxInt64,
+		ListsPerSecond:         math.MaxInt64,
+		UploadBytesPerSecond:   math.MaxInt64,
+		DownloadBytesPerSecond: math.MaxInt64,
+		ConcurrentReads:        math.MaxInt,
+		ConcurrentWrites:       math.MaxInt,
+		//DownloadBytesPerSecond: optionalHaveFloat64(ctx, udmrepo.ThrottleOptionDownloadBytes, flags),
+		//ListsPerSecond:         optionalHaveFloat64(ctx, udmrepo.ThrottleOptionListOps, flags),
+		//ReadsPerSecond:         optionalHaveFloat64(ctx, udmrepo.ThrottleOptionReadOps, flags),
+		//UploadBytesPerSecond:   optionalHaveFloat64(ctx, udmrepo.ThrottleOptionUploadBytes, flags),
+		//WritesPerSecond:        optionalHaveFloat64(ctx, udmrepo.ThrottleOptionWriteOps, flags),
 	}
 }
 
@@ -52,12 +57,12 @@ func setupLimits(ctx context.Context, flags map[string]string) throttling.Limits
 func SetupNewRepositoryOptions(ctx context.Context, flags map[string]string) repo.NewRepositoryOptions {
 	return repo.NewRepositoryOptions{
 		BlockFormat: format.ContentFormat{
-			Hash:       optionalHaveStringWithDefault(udmrepo.StoreOptionGenHashAlgo, flags, hashing.DefaultAlgorithm),
+			Hash:       optionalHaveStringWithDefault(udmrepo.StoreOptionGenHashAlgo, flags, "BLAKE3-256"),
 			Encryption: optionalHaveStringWithDefault(udmrepo.StoreOptionGenEncryptAlgo, flags, encryption.DefaultAlgorithm),
 		},
-
+		DisableHMAC: true,
 		ObjectFormat: format.ObjectFormat{
-			Splitter: optionalHaveStringWithDefault(udmrepo.StoreOptionGenSplitAlgo, flags, splitter.DefaultAlgorithm),
+			Splitter: optionalHaveStringWithDefault(udmrepo.StoreOptionGenSplitAlgo, flags, "FIXED-4M"),
 		},
 
 		RetentionMode:   blob.RetentionMode(optionalHaveString(udmrepo.StoreOptionGenRetentionMode, flags)),

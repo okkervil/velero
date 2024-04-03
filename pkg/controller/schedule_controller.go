@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"time"
 
 	"github.com/pkg/errors"
@@ -79,6 +80,9 @@ func (c *scheduleReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		})).
 		For(&velerov1.Schedule{}, bld.WithPredicates(kube.SpecChangePredicate{})).
 		Watches(s, nil).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(c)
 }
 

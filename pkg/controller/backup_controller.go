@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"strings"
 	"time"
 
@@ -147,6 +148,9 @@ func NewBackupReconciler(
 func (b *backupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&velerov1api.Backup{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(b)
 }
 

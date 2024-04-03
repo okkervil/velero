@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"time"
 
 	"github.com/pkg/errors"
@@ -89,6 +90,9 @@ func (c *gcReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			},
 		})).
 		Watches(s, nil).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(c)
 }
 

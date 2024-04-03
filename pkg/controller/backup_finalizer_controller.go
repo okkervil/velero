@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -213,6 +214,9 @@ func (r *backupFinalizerReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 func (r *backupFinalizerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&velerov1api.Backup{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(r)
 }
 

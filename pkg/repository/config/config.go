@@ -80,6 +80,11 @@ func getRepoPrefix(location *velerov1api.BackupStorageLocation) (string, error) 
 			url = fmt.Sprintf("s3-%s.amazonaws.com", region)
 		}
 
+		if s3ForcePathStyle := location.Spec.Config["s3ForcePathStyle"]; s3ForcePathStyle == "false" {
+			urls := strings.Split(url, "//")
+			return fmt.Sprintf("s3:%s//%s.%s/%s", urls[0], bucket, urls[1], prefix), nil
+		}
+
 		return fmt.Sprintf("s3:%s/%s", url, path.Join(bucket, prefix)), nil
 	case AzureBackend:
 		return fmt.Sprintf("azure:%s:/%s", bucket, prefix), nil

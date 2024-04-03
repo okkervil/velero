@@ -17,10 +17,13 @@ limitations under the License.
 package kopia
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -42,6 +45,8 @@ import (
 	"github.com/kopia/kopia/snapshot/snapshotfs"
 	"github.com/pkg/errors"
 )
+
+const encryptionKey = "static-passw0rd"
 
 // All function mainly used to make testing more convenient
 var applyRetentionPolicyFunc = policy.ApplyRetentionPolicy
@@ -93,8 +98,8 @@ func getDefaultPolicy() *policy.Policy {
 			CompressorName: "none",
 		},
 		UploadPolicy: policy.UploadPolicy{
-			MaxParallelFileReads:    newOptionalInt(runtime.NumCPU()),
-			ParallelUploadAboveSize: newOptionalInt64(math.MaxInt64),
+			MaxParallelFileReads: newOptionalInt(20000),
+			//ParallelUploadAboveSize: newOptionalInt64(math.MaxInt64),
 		},
 		SchedulingPolicy: policy.SchedulingPolicy{
 			Manual: true,
@@ -106,6 +111,9 @@ func getDefaultPolicy() *policy.Policy {
 }
 
 func setupDefaultPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceInfo snapshot.SourceInfo) (*policy.Tree, error) {
+	defaultPolicy := getDefaultPolicy()
+	policyTree := policy.BuildTree(nil, defaultPolicy)
+
 	// some internal operations from Kopia code retrieves policies from repo directly, so we need to persist the policy to repo
 	err := setPolicyFunc(ctx, rep, sourceInfo, getDefaultPolicy())
 	if err != nil {
@@ -118,17 +126,17 @@ func setupDefaultPolicy(ctx context.Context, rep repo.RepositoryWriter, sourceIn
 	}
 
 	// retrieve policy from repo
-	policyTree, err := treeForSourceFunc(ctx, rep, sourceInfo)
-	if err != nil {
-		return nil, errors.Wrap(err, "error to retrieve policy")
-	}
+	//policyTree, err := treeForSourceFunc(ctx, rep, sourceInfo)
+	//if err != nil {
+	//	return nil, errors.Wrap(err, "error to retrieve policy")
+	//}
 
 	return policyTree, nil
 }
 
 // Backup backup specific sourcePath and update progress
 func Backup(ctx context.Context, fsUploader SnapshotUploader, repoWriter repo.RepositoryWriter, sourcePath string, realSource string,
-	forceFull bool, parentSnapshot string, volMode uploader.PersistentVolumeMode, tags map[string]string, log logrus.FieldLogger) (*uploader.SnapshotInfo, bool, error) {
+	forceFull bool, parentSnapshot string, volMode uploader.PersistentVolumeMode, tags map[string]string, log logrus.FieldLogger, configFile string) (*uploader.SnapshotInfo, bool, error) {
 	if fsUploader == nil {
 		return nil, false, errors.New("get empty kopia uploader")
 	}
@@ -173,7 +181,8 @@ func Backup(ctx context.Context, fsUploader SnapshotUploader, repoWriter repo.Re
 	}
 
 	kopiaCtx := kopia.SetupKopiaLog(ctx, log)
-	snapID, snapshotSize, err := SnapshotSource(kopiaCtx, repoWriter, fsUploader, sourceInfo, sourceEntry, forceFull, parentSnapshot, tags, log, "Kopia Uploader")
+
+	snapID, snapshotSize, err := SnapshotSource(kopiaCtx, repoWriter, fsUploader, sourceInfo, sourceEntry, forceFull, parentSnapshot, tags, log, "Kopia Uploader", configFile)
 	if err != nil {
 		return nil, false, err
 	}
@@ -226,57 +235,111 @@ func SnapshotSource(
 	snapshotTags map[string]string,
 	log logrus.FieldLogger,
 	description string,
+	configFile string,
 ) (string, int64, error) {
 	log.Info("Start to snapshot...")
 	snapshotStartTime := time.Now()
 
-	var previous []*snapshot.Manifest
-	if !forceFull {
-		if parentSnapshot != "" {
-			log.Infof("Using provided parent snapshot %s", parentSnapshot)
+	//var previous []*snapshot.Manifest
+	//if !forceFull {
+	//	if parentSnapshot != "" {
+	//		log.Infof("Using provided parent snapshot %s", parentSnapshot)
+	//
+	//		mani, err := loadSnapshotFunc(ctx, rep, manifest.ID(parentSnapshot))
+	//		if err != nil {
+	//			log.WithError(err).Warnf("Failed to load previous snapshot %v from kopia, fallback to full backup", parentSnapshot)
+	//		} else {
+	//			previous = append(previous, mani)
+	//		}
+	//	} else {
+	//		log.Infof("Searching for parent snapshot")
+	//
+	//		pre, err := findPreviousSnapshotManifest(ctx, rep, sourceInfo, snapshotTags, nil, log)
+	//		if err != nil {
+	//			return "", 0, errors.Wrapf(err, "Failed to find previous kopia snapshot manifests for si %v", sourceInfo)
+	//		}
+	//
+	//		previous = pre
+	//	}
+	//} else {
+	//	log.Info("Forcing full snapshot")
+	//}
+	//
+	//for i := range previous {
+	//	log.Infof("Using parent snapshot %s, start time %v, end time %v, description %s", previous[i].ID, previous[i].StartTime.ToTime(), previous[i].EndTime.ToTime(), previous[i].Description)
+	//}
 
-			mani, err := loadSnapshotFunc(ctx, rep, manifest.ID(parentSnapshot))
-			if err != nil {
-				log.WithError(err).Warnf("Failed to load previous snapshot %v from kopia, fallback to full backup", parentSnapshot)
-			} else {
-				previous = append(previous, mani)
-			}
-		} else {
-			log.Infof("Searching for parent snapshot")
+	kopiaCmd(log, "repo", "set-parameters", "--max-pack-size-mb=21", fmt.Sprintf("--config-file=%s", configFile), fmt.Sprintf("--password=%s", encryptionKey))
 
-			pre, err := findPreviousSnapshotManifest(ctx, rep, sourceInfo, snapshotTags, nil, log)
-			if err != nil {
-				return "", 0, errors.Wrapf(err, "Failed to find previous kopia snapshot manifests for si %v", sourceInfo)
-			}
-
-			previous = pre
-		}
-	} else {
-		log.Info("Forcing full snapshot")
-	}
-
-	for i := range previous {
-		log.Infof("Using parent snapshot %s, start time %v, end time %v, description %s", previous[i].ID, previous[i].StartTime.ToTime(), previous[i].EndTime.ToTime(), previous[i].Description)
-	}
-
-	policyTree, err := setupDefaultPolicy(ctx, rep, sourceInfo)
+	_, err := setupDefaultPolicy(ctx, rep, sourceInfo)
 	if err != nil {
 		return "", 0, errors.Wrapf(err, "unable to set policy for si %v", sourceInfo)
 	}
 
-	manifest, err := u.Upload(ctx, rootDir, policyTree, sourceInfo, previous...)
+	//log.Infof("start to upload, rootDir.LocalFilesystemPath: %s, policyTree: %v, sourceInfo: %s",
+	//	rootDir.LocalFilesystemPath(), *policyTree.EffectivePolicy(), sourceInfo.String())
+
+	log.Infof("configFile: %s", configFile)
+	log.Infof("snapshotTags: %s", snapshotTags)
+
+	//kopia snapshot create /host_pods/021d28f1-0193-4c9f-bdbc-54e08404f288/volumes/kubernetes.io~csi/pv-307429f3-b23b-49ef-b5e8-161726228693/mount/  --config-file="/tmp/repository.config" --password=static-passw0rd --log-level=debug
+
+	ID := ""
+
+	_, outputs := kopiaCmd(log, "snapshot", "create", rootDir.LocalFilesystemPath(),
+		fmt.Sprintf("--config-file=%s", configFile), fmt.Sprintf("--password=%s", encryptionKey),
+		fmt.Sprintf("--pin=%s", "velero-pin"), fmt.Sprintf("--description=%s", "Kopia-Uploader"),
+		kopiaTags(snapshotTags), "--json")
+
+	var br BackupResult
+	err = json.Unmarshal([]byte(outputs[0]), &br)
 	if err != nil {
-		return "", 0, errors.Wrapf(err, "Failed to upload the kopia snapshot for si %v", sourceInfo)
+		log.Fatal(err)
 	}
 
-	manifest.Tags = snapshotTags
+	// 打印从JSON解析的size字段
+	fmt.Printf("Size: %d\n", br.RootEntry.Summ.Size)
 
-	manifest.Description = description
-	manifest.Pins = []string{"velero-pin"}
+	//pattern := `ID\s+([^\s]+)\s+in`
+	//re := regexp.MustCompile(pattern)
+	//matches := re.FindStringSubmatch(outputs[1])
+	//if len(matches) > 1 {
+	//	log.Infof("ID: %s", matches[1])
+	//	ID = matches[1]
+	//} else {
+	//	log.Errorf("ID not found.")
+	//}
+	//
+	//sm := snapshot.Manifest{}
+	//
+	//_, err = rep.GetManifest(ctx, manifest.ID(ID), &sm)
+	//
+	//if err != nil {
+	//	log.Errorf("err: %v", err)
+	//}
 
-	if _, err = saveSnapshotFunc(ctx, rep, manifest); err != nil {
-		return "", 0, errors.Wrapf(err, "Failed to save kopia manifest %v", manifest.ID)
-	}
+	//time.Sleep(15 * time.Second)
+
+	//log.Infof("Searching for parent snapshot")
+	//
+	//pre, err := findPreviousSnapshotManifest(ctx, rep, sourceInfo, snapshotTags, nil, log)
+	//if err != nil {
+	//	return "", 0, errors.Wrapf(err, "Failed to find previous kopia snapshot manifests for si %v", sourceInfo)
+	//}
+
+	//mf, err := u.Upload(ctx, rootDir, policyTree, sourceInfo, previous...)
+	//if err != nil {
+	//	return "", 0, errors.Wrapf(err, "Failed to upload the kopia snapshot for si %v", sourceInfo)
+	//}
+	//
+	//mf.Tags = snapshotTags
+	//
+	//mf.Description = description
+	//mf.Pins = []string{"velero-pin"}
+	//
+	//if _, err = saveSnapshotFunc(ctx, rep, mf); err != nil {
+	//	return "", 0, errors.Wrapf(err, "Failed to save kopia mf %v", mf.ID)
+	//}
 
 	_, err = applyRetentionPolicyFunc(ctx, rep, sourceInfo, true)
 	if err != nil {
@@ -286,8 +349,10 @@ func SnapshotSource(
 	if err = rep.Flush(ctx); err != nil {
 		return "", 0, errors.Wrapf(err, "Failed to flush kopia repository")
 	}
-	log.Infof("Created snapshot with root %v and ID %v in %v", manifest.RootObjectID(), manifest.ID, time.Since(snapshotStartTime).Truncate(time.Second))
-	return reportSnapshotStatus(manifest, policyTree)
+	//log.Infof("Created snapshot with root %v and ID %v in %v", mf.RootObjectID(), mf.ID, time.Since(snapshotStartTime).Truncate(time.Second))
+	log.Infof("Created snapshot ID %v in %v", ID, time.Since(snapshotStartTime).Truncate(time.Second))
+	//return reportSnapshotStatus(mf, policyTree)
+	return br.ID, br.RootEntry.Summ.Size, nil
 }
 
 func reportSnapshotStatus(manifest *snapshot.Manifest, policyTree *policy.Tree) (string, int64, error) {
@@ -416,4 +481,76 @@ func Restore(ctx context.Context, rep repo.RepositoryWriter, progress *Progress,
 		return 0, 0, errors.Wrapf(err, "Failed to copy snapshot data to the target")
 	}
 	return stat.RestoredTotalFileSize, stat.RestoredFileCount, nil
+}
+
+func kopiaCmd(log logrus.FieldLogger, args ...string) (error, []string) {
+	cmd := exec.Command("kopia", args...)
+	log.Infof("kopia cmd: %s", cmd.Args)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	var outErr bytes.Buffer
+	cmd.Stderr = &outErr
+
+	err := cmd.Run()
+
+	output := strings.TrimSpace(out.String())
+	log.Infof("kopia cmd stdout: %s", output)
+
+	outputErr := strings.TrimSpace(outErr.String())
+	log.Infof("kopia cmd stderr: %s", outputErr)
+
+	if err != nil {
+		log.Errorf("Error running command: %s", err.Error())
+		return err, nil
+	}
+
+	return nil, []string{output, outputErr}
+}
+
+func kopiaTags(m map[string]string) string {
+	var pairs []string
+
+	for k, v := range m {
+		pairs = append(pairs, fmt.Sprintf("--tags=%s:%s ", k, v))
+	}
+
+	return strings.Join(pairs, "")
+}
+
+type BackupResult struct {
+	ID          string            `json:"id"`
+	Source      Source            `json:"source"`
+	Description string            `json:"description"`
+	StartTime   string            `json:"startTime"`
+	EndTime     string            `json:"endTime"`
+	RootEntry   Entry             `json:"rootEntry"`
+	Tags        map[string]string `json:"tags"`
+	Pins        []string          `json:"pins"`
+}
+
+type Source struct {
+	Host     string `json:"host"`
+	UserName string `json:"userName"`
+	Path     string `json:"path"`
+}
+
+type Entry struct {
+	Name  string  `json:"name"`
+	Type  string  `json:"type"`
+	Mode  string  `json:"mode"`
+	Mtime string  `json:"mtime"`
+	GID   int     `json:"gid"`
+	Obj   string  `json:"obj"`
+	Summ  Summary `json:"summ"`
+}
+
+type Summary struct {
+	Size      int64  `json:"size"`
+	Files     int    `json:"files"`
+	Symlinks  int    `json:"symlinks"`
+	Dirs      int    `json:"dirs"`
+	MaxTime   string `json:"maxTime"`
+	NumFailed int    `json:"numFailed"`
 }

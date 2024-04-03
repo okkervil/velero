@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -107,6 +108,9 @@ func (r *backupDeletionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&velerov1api.DeleteBackupRequest{}).
 		Watches(s, nil).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(r)
 }
 

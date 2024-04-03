@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"time"
 
 	snapshotv1api "github.com/kubernetes-csi/external-snapshotter/client/v4/apis/volumesnapshot/v1"
@@ -307,6 +308,9 @@ func (b *backupSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		// Filter all BSL events, because this controller is supposed to run periodically, not by event.
 		For(&velerov1api.BackupStorageLocation{}, builder.WithPredicates(kube.FalsePredicate{})).
 		Watches(backupSyncSource, nil, builder.WithPredicates(gp)).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(b)
 }
 

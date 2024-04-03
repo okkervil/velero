@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"time"
 
 	"github.com/pkg/errors"
@@ -208,6 +209,9 @@ func (c *PodVolumeRestoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&velerov1api.PodVolumeRestore{}).
 		Watches(&source.Kind{Type: &corev1api.Pod{}}, handler.EnqueueRequestsFromMapFunc(c.findVolumeRestoresForPod)).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(c)
 }
 

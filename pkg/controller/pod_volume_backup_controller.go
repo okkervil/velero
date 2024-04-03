@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"time"
 
 	"github.com/pkg/errors"
@@ -59,7 +60,7 @@ func NewPodVolumeBackupReconciler(client client.Client, ensurer *repository.Ensu
 		clock:             &clocks.RealClock{},
 		scheme:            scheme,
 		metrics:           metrics,
-		dataPathMgr:       datapath.NewManager(1),
+		dataPathMgr:       datapath.NewManager(10),
 	}
 }
 
@@ -276,6 +277,9 @@ func (r *PodVolumeBackupReconciler) OnDataPathProgress(ctx context.Context, name
 func (r *PodVolumeBackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&velerov1api.PodVolumeBackup{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(r)
 }
 

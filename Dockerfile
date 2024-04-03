@@ -70,13 +70,22 @@ RUN mkdir -p /output/usr/bin && \
     go clean -modcache -cache
 
 # Velero image packing section
-FROM paketobuildpacks/run-jammy-tiny:0.2.11
+#FROM paketobuildpacks/run-jammy-tiny:0.2.11
+FROM ubuntu
 
 LABEL maintainer="Xun Jiang <jxun@vmware.com>"
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl vim
 
 COPY --from=velero-builder /output /
 
 COPY --from=restic-builder /output /
 
-USER cnb:cnb
+ENV KOPIA_CHECK_FOR_UPDATES=false \
+    XDG_CACHE_HOME="/tmp" \
+    XDG_CONFIG_HOME="/tmp/.config"
+
+COPY ./kopia /usr/local/bin/
+
+#USER cnb:cnb
 

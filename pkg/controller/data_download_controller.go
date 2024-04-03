@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"time"
 
 	"github.com/pkg/errors"
@@ -505,6 +506,9 @@ func (r *DataDownloadReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					return false
 				},
 			})).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(r)
 }
 

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sort"
 	"strings"
 	"time"
@@ -282,6 +283,9 @@ func (r *restoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *restoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&api.Restore{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(r)
 }
 

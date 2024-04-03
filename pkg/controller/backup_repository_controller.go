@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"reflect"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"time"
 
 	"github.com/pkg/errors"
@@ -81,6 +82,9 @@ func (r *BackupRepoReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				kube.NewUpdateEventPredicate(r.needInvalidBackupRepo),
 				// When BSL is created, invalidate any backup repositories that reference it
 				kube.NewCreateEventPredicate(func(client.Object) bool { return true }))).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(r)
 }
 

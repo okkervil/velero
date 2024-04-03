@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"time"
 
 	"github.com/pkg/errors"
@@ -230,5 +231,8 @@ func (r *downloadRequestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&velerov1api.DownloadRequest{}).
 		Watches(downloadRequestSource, nil, builder.WithPredicates(downloadRequestPredicates)).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: 10,
+		}).
 		Complete(r)
 }
